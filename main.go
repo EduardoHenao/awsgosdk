@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"log"
@@ -8,6 +9,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/google/uuid"
 )
 
 func main() {
@@ -19,8 +22,93 @@ func main() {
 	BucketCreate(s3svc, bucketName)
 	BucketsList(s3svc)
 
+	BucketObjectsCreate(s3svc, bucketName)
+
+	objects := BucketObjectsList(s3svc, bucketName)
+	for _, object := range objects {
+		log.Default().Printf("object: [%v]", object)
+	}
+
+	BucketObjectsDelete(s3svc, bucketName, objects)
+
 	BucketDelete(s3svc, bucketName)
 	BucketsList(s3svc)
+}
+
+func BucketObjectsDelete(s3Client *s3.Client, bucketName string, keys []string) error {
+	// Prepare the list of objects to delete
+	var objectsToDelete []types.ObjectIdentifier
+	for _, key := range keys {
+		objectsToDelete = append(objectsToDelete, types.ObjectIdentifier{Key: aws.String(key)})
+	}
+
+	// Call DeleteObjects to delete the specified objects
+	output, err := s3Client.DeleteObjects(context.TODO(), &s3.DeleteObjectsInput{
+		Bucket: aws.String(bucketName),
+		Delete: &types.Delete{
+			Objects: objectsToDelete,
+			Quiet:   aws.Bool(true), // If set to true, no output is returned for each deleted object
+		},
+	})
+	if err != nil {
+		return fmt.Errorf("unable to delete objects: %v", err)
+	}
+
+	// Handle any errors from the deletion operation
+	if len(output.Errors) > 0 {
+		for _, errObj := range output.Errors {
+			fmt.Printf("Failed to delete %s: %v\n", *errObj.Key, *errObj.Message)
+		}
+		return fmt.Errorf("some objects could not be deleted")
+	}
+
+	return nil
+}
+
+func BucketObjectsCreate(s3svc *s3.Client, bucketName string) {
+	for i := 0; i < 5; i++ {
+		fileName, err := uploadRandomFile(s3svc, bucketName, i)
+		if err != nil {
+			log.Fatalf("error uploading file [%v] to s3 bucket [%v]", bucketName, fileName)
+		}
+	}
+}
+
+func uploadRandomFile(s3Client *s3.Client, bucketName string, key int) (string, error) {
+	// Generate a random file name and content
+	fileName := fmt.Sprintf("file_%d.txt", key)
+	fileContent := uuid.New().String()
+
+	// Create an input for the PutObject operation
+	input := &s3.PutObjectInput{
+		Bucket:            aws.String(bucketName),
+		Key:               aws.String(fileName),
+		Body:              bytes.NewReader([]byte(fileContent)),
+		ChecksumAlgorithm: types.ChecksumAlgorithmSha256,
+	}
+
+	// Upload the file
+	_, err := s3Client.PutObject(context.TODO(), input)
+	if err != nil {
+		return "", fmt.Errorf("unable to upload file %s: %v", fileName, err)
+	}
+
+	return fileName, nil
+}
+
+func BucketObjectsList(s3svc *s3.Client, bucketName string) []string {
+	var answer []string
+	resp, err := s3svc.ListObjectsV2(context.TODO(), &s3.ListObjectsV2Input{
+		Bucket: aws.String(bucketName),
+	})
+	if err != nil {
+		log.Fatalf("failed to get objects in bucket %v", err)
+	}
+
+	for _, object := range resp.Contents {
+		answer = append(answer, aws.ToString(object.Key))
+	}
+	return answer
 }
 
 func BucketDelete(s3svc *s3.Client, bucketName string) {
