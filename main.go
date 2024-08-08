@@ -25,9 +25,6 @@ func main() {
 	BucketObjectsCreate(s3svc, bucketName)
 
 	objects := BucketObjectsList(s3svc, bucketName)
-	for _, object := range objects {
-		log.Default().Printf("object: [%v]", object)
-	}
 
 	BucketObjectsDelete(s3svc, bucketName, objects)
 
@@ -107,6 +104,7 @@ func BucketObjectsList(s3svc *s3.Client, bucketName string) []string {
 
 	for _, object := range resp.Contents {
 		answer = append(answer, aws.ToString(object.Key))
+		log.Default().Printf("object: [%v]", object.Key)
 	}
 	return answer
 }
